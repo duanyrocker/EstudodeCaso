@@ -1,0 +1,51 @@
+name: CI Pipeline
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+
+jobs:
+  build:
+    runs-on: ubuntu-latest  # Define o ambiente em que o pipeline será executado
+
+    steps:
+      # Etapa 1: Checkout do código
+      - name: Checkout code
+        uses: actions/checkout@v3  # Faz o checkout do código do repositório
+
+      # Etapa 2: Configuração do Python
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'  # Defina a versão do Python que você está usando
+
+      # Etapa 3: Instalar as dependências
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # Etapa 4: Rodar os testes unitários
+      - name: Run tests
+        run: |
+          python -m unittest discover -s tests  # Aqui você pode modificar para rodar seus testes conforme o que tiver configurado
+
+      # Etapa 5: Análise estática com Bandit
+      - name: Run Bandit for static analysis
+        run: |
+          pip install bandit
+          bandit -r .  # Análise de segurança do código com Bandit
+
+      # Etapa 6: Análise de dependências com OWASP Dependency-Check
+      - name: Run OWASP Dependency Check
+        run: |
+          docker run --rm -v $(pwd):/src owasp/dependency-check --scan /src --format HTML --out /src/reports
+
+      # Etapa 7: Análise dinâmica com ZAP (opcional)
+      - name: Run ZAP for dynamic analysis
+        run: |
+          docker run -u zap -p 8080:8080 -i owasp/zap2docker-stable zap-baseline.py -t http://localhost:5000  # Aqui você pode alterar a URL conforme seu ambiente
