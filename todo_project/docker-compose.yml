@@ -1,0 +1,53 @@
+version: "3.9"
+
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: estudo-caso
+    ports:
+      - "5002:5002"
+    volumes:
+      - .:/app
+    environment:
+      - FLASK_APP=run.py
+      - FLASK_ENV=development
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/todoapp
+    depends_on:
+      - db
+    command: python run.py
+    networks:
+      - app_network
+
+  db:
+    image: postgres:15
+    container_name: estudo-caso-db
+    restart: always
+    environment:
+      POSTGRES_DB: todoapp
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - app_network
+
+  zap:
+    image: zaproxy/zap-stable:latest
+    ports:
+      - "8080:8080"
+    container_name: zap_proxy
+    command: ["zap-baseline.py", "-t", "http://web:5002"]  # Acessando o Flask na porta 5002
+    networks:
+      - app_network
+
+networks:
+  app_network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+
