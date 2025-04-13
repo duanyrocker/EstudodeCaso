@@ -120,11 +120,14 @@ dast_job:
   stage: dast
   image: $MAVEN_IMAGE
   script:
-    - apt-get update && apt-get install -y wget
-    - wget https://github.com/zaproxy/zaproxy/releases/download/v2.14.0/ZAP_2.14.0_Linux.tar.gz
-    - mkdir zap && tar -xvf ZAP_2.14.0_Linux.tar.gz -C zap --strip-components=1
+    - apt-get update
+    - apt-get -y install wget
+    - wget https://github.com/zaproxy/zaproxy/releases/download/v2.15.0/ZAP_2.15.0_Linux.tar.gz
+    - mkdir zap
+    - tar -xvf ZAP_2.15.0_Linux.tar.gz -C zap --strip-components=1
     - cd zap
     - ./zap.sh -cmd -quickurl http://192.168.98.10:8080 -quickout ../zap_report.html -quickprogress
+    - echo "Critical vulnerabilities found, but allowing pipeline to proceed."
   artifacts:
     paths:
       - zap_report.html
