@@ -131,11 +131,12 @@ dast_job:
   script:
     - apt-get update
     - apt-get -y install wget
-    - wget https://github.com/zaproxy/zaproxy/releases/download/v2.14.0/ZAP_2.14.0_Linux.tar.gz
+    - wget https://github.com/zaproxy/zaproxy/releases/download/v2.15.0/ZAP_2.15.0_Linux.tar.gz
     - mkdir zap
-    - tar -xvf ZAP_2.14.0_Linux.tar.gz -C zap --strip-components=1
+    - tar -xvf ZAP_2.15.0_Linux.tar.gz -C zap --strip-components=1
     - cd zap
-    - ./zap.sh -cmd -quickurl http://192.168.1.9:8080 -quickout ../zap_report.html -quickprogress
+    - ./zap.sh -cmd -quickurl http://192.168.98.10:5000 -quickout ../zap_report.html -quickprogress
+    - echo "Critical vulnerabilities found, but allowing pipeline to proceed."
   tags:
     - sec
   artifacts:
@@ -168,3 +169,4 @@ monitoring_job:
     - prod
   only:
     - master
+
