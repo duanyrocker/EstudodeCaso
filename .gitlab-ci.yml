@@ -1,151 +1,170 @@
 variables:
-  DOCKER_TLS_CERTDIR: "/certs"
-  DOCKER_CLIENT_TIMEOUT: 600
-  COMPOSE_HTTP_TIMEOUT: 600
-  DOCKER_BUILDKIT: 0
-  COMPOSE_DOCKER_CLI_BUILD: 0
+  PYTHON_IMAGE: "python:3.9-slim-buster"
   DOCKER_IMAGE: "docker:20.10"
   DOCKER_COMPOSE_IMAGE: "docker/compose:1.29.2"
-  PYTHON_IMAGE: "python:3.9-slim-buster"
   DEPENDENCY_CHECK_IMAGE: "nbaars/owasp-dependency-check-as-one"
   PIP_UPGRADE_CMD: "pip install --upgrade pip"
-  MAVEN_IMAGE: "maven:3.8.5-openjdk-17-slim"
 
 stages:
-  - build
   - tests
   - sast
   - review
-  - approval
   - dast
   - deploy
+  - monitoring
 
-######################
-# BUILD
-######################
-build_job:
-  stage: build
-  image: $DOCKER_IMAGE
-  services:
-    - docker:20.10-dind
-  script:
-    - docker build -t task-manager-using-flask_web .
-  rules:
-    - if: '$CI_COMMIT_BRANCH == "development"'
-    - if: '$CI_COMMIT_BRANCH == "staging"'
-
-######################
-# TESTES
-######################
-tests_unit:
+tests_unit_job:
   stage: tests
-  image: $PYTHON_IMAGE
+  image: ${PYTHON_IMAGE}
   script:
-    - $PIP_UPGRADE_CMD
+    - ${PIP_UPGRADE_CMD}
     - pip install -r requirements.txt
     - python3 -m unittest discover -s todo_project/todo_project/tests/unit
-  rules:
-    - if: '$CI_COMMIT_BRANCH == "development"'
+  tags:
+    - dev
+  only:
+    - master
 
-tests_integration:
+tests_integration_job:
   stage: tests
-  image: $PYTHON_IMAGE
+  image: ${PYTHON_IMAGE}
   script:
-    - $PIP_UPGRADE_CMD
+    - ${PIP_UPGRADE_CMD}
     - pip install -r requirements.txt
     - python3 -m unittest discover -s todo_project/todo_project/tests/integration
-  rules:
-    - if: '$CI_COMMIT_BRANCH == "staging"'
+  tags:
+    - qa
+  only:
+    - master
 
-tests_functional:
+tests_functional_job:
   stage: tests
-  image: $PYTHON_IMAGE
+  image: ${PYTHON_IMAGE}
   script:
-    - $PIP_UPGRADE_CMD
+    - ${PIP_UPGRADE_CMD}
     - pip install -r requirements.txt
     - pip install selenium
     - python3 -m unittest discover -s todo_project/todo_project/tests/functional
-  rules:
-    - if: '$CI_COMMIT_BRANCH == "staging"'
+  tags:
+    - qa
+  only:
+    - master
 
-######################
-# SAST
-######################
 bandit_job:
   stage: sast
-  image: $PYTHON_IMAGE
+  image: ${PYTHON_IMAGE}
   script:
-    - $PIP_UPGRADE_CMD
+    - ${PIP_UPGRADE_CMD}
     - pip install bandit
     - bandit -r . -f html -o bandit-report.html || true
     - bandit -r . -f json | tee bandit-output.json || true
+  tags:
+    - sec
   artifacts:
     paths:
       - bandit-report.html
       - bandit-output.json
     expire_in: 1 week
-  rules:
-    - if: '$CI_COMMIT_BRANCH == "development"'
+  only:
+    - master
 
 dependency_check_job:
   stage: sast
-  image: $DEPENDENCY_CHECK_IMAGE
+  image: ${DEPENDENCY_CHECK_IMAGE}
   script:
     - mkdir -p report
     - chmod +x report
     - dependency-check --project "task-manager-using-flask" --format "HTML" --out report --scan .
+  tags:
+    - sec
   artifacts:
+    when: always
     paths:
       - report/dependency-check-report.html
     expire_in: 1 week
-  rules:
-    - if: '$CI_COMMIT_BRANCH == "development"'
+  only:
+    - master
 
-######################
-# APROVAÇÃO
-######################
-approval_job:
-  stage: approval
+review_deploy_job:
+  stage: review
+  image: ${DOCKER_COMPOSE_IMAGE}
+  services:
+    - docker:20.10-dind
   script:
-    - echo "Aguardando aprovação para DAST"
+    - docker-compose -f docker-compose.review.yml down || true
+    - docker-compose -f docker-compose.review.yml up -d
+  environment:
+    name: review/$CI_COMMIT_REF_NAME
+    url: http://$CI_ENVIRONMENT_SLUG.example.com
+    on_stop: stop_review_job
+  tags:
+    - dev
+    - qa
+  only:
+    - merge_requests
+    - master
   when: manual
-  allow_failure: false
-  rules:
-    - if: '$CI_COMMIT_BRANCH == "staging"'
 
-######################
-# DAST (ZAP)
-######################
+stop_review_job:
+  stage: review
+  image: ${DOCKER_COMPOSE_IMAGE}
+  services:
+    - docker:20.10-dind
+  script:
+    - docker stop task-manager-using-flask-web || true
+    - docker rm task-manager-using-flask-web || true
+    - docker rmi task-manager-using-flask-web || true
+  environment:
+    name: review/$CI_COMMIT_REF_NAME
+    action: stop
+  tags:
+    - dev
+    - qa
+  only:
+    - merge_requests
+    - master
+  when: manual
+
 dast_job:
   stage: dast
-  image: $MAVEN_IMAGE
+  image: maven:3.8.5-openjdk-17-slim
   script:
     - apt-get update
     - apt-get -y install wget
-    - wget https://github.com/zaproxy/zaproxy/releases/download/v2.15.0/ZAP_2.15.0_Linux.tar.gz
+    - wget https://github.com/zaproxy/zaproxy/releases/download/v2.14.0/ZAP_2.14.0_Linux.tar.gz
     - mkdir zap
-    - tar -xvf ZAP_2.15.0_Linux.tar.gz -C zap --strip-components=1
+    - tar -xvf ZAP_2.14.0_Linux.tar.gz -C zap --strip-components=1
     - cd zap
-    - ./zap.sh -cmd -quickurl http://192.168.98.10:5000 -quickout ../zap_report.html -quickprogress
-    - echo "Critical vulnerabilities found, but allowing pipeline to proceed."
+    - ./zap.sh -cmd -quickurl http://192.168.1.9:8080 -quickout ../zap_report.html -quickprogress
+  tags:
+    - sec
   artifacts:
     paths:
       - zap_report.html
     expire_in: 1 week
-  rules:
-    - if: '$CI_COMMIT_BRANCH == "staging"'
+  only:
+    - master
 
-######################
-# DEPLOY
-######################
-deploy_staging:
+deploy_job:
   stage: deploy
-  image: $DOCKER_COMPOSE_IMAGE
+  image: ${DOCKER_COMPOSE_IMAGE}
   services:
     - docker:20.10-dind
   script:
-    - docker-compose -f docker-compose.yml down || true
-    - docker-compose -f docker-compose.yml up -d
-  rules:
-    - if: '$CI_COMMIT_BRANCH == "staging"'
+    - docker-compose down
+    - docker-compose up -d
+  only:
+    - master
 
+monitoring_job:
+  stage: monitoring
+  image: ${DOCKER_COMPOSE_IMAGE}
+  services:
+    - docker:20.10-dind
+  script:
+    - echo "Monitoring Analytics"
+    - docker-compose -f docker-compose.yml up -d
+  tags:
+    - prod
+  only:
+    - master
