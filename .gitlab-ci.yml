@@ -85,46 +85,6 @@ dependency_check_job:
   only:
     - master
 
-review_deploy_job:
-  stage: review
-  image: ${DOCKER_COMPOSE_IMAGE}
-  services:
-    - docker:20.10-dind
-  script:
-    - docker-compose -f docker-compose.review.yml down || true
-    - docker-compose -f docker-compose.review.yml up -d
-  environment:
-    name: review/$CI_COMMIT_REF_NAME
-    url: http://$CI_ENVIRONMENT_SLUG.example.com
-    on_stop: stop_review_job
-  tags:
-    - dev
-    - qa
-  only:
-    - merge_requests
-    - master
-  when: manual
-
-stop_review_job:
-  stage: review
-  image: ${DOCKER_COMPOSE_IMAGE}
-  services:
-    - docker:20.10-dind
-  script:
-    - docker stop task-manager-using-flask-web || true
-    - docker rm task-manager-using-flask-web || true
-    - docker rmi task-manager-using-flask-web || true
-  environment:
-    name: review/$CI_COMMIT_REF_NAME
-    action: stop
-  tags:
-    - dev
-    - qa
-  only:
-    - merge_requests
-    - master
-  when: manual
-
 dast_job:
   stage: dast
   image: maven:3.8.5-openjdk-17-slim
