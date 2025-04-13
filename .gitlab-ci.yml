@@ -5,84 +5,144 @@ variables:
   DOCKER_BUILDKIT: 0
   COMPOSE_DOCKER_CLI_BUILD: 0
   DOCKER_IMAGE: "docker:20.10"
+  DOCKER_COMPOSE_IMAGE: "docker/compose:1.29.2"
   PYTHON_IMAGE: "python:3.9-slim-buster"
   DEPENDENCY_CHECK_IMAGE: "nbaars/owasp-dependency-check-as-one"
   PIP_UPGRADE_CMD: "pip install --upgrade pip"
+  MAVEN_IMAGE: "maven:3.8.5-openjdk-17-slim"
 
 stages:
   - build
   - tests
   - sast
+  - review
   - approval
+  - dast
+  - deploy
 
+######################
+# BUILD
+######################
 build_job:
   stage: build
-  image: ${DOCKER_IMAGE}
+  image: $DOCKER_IMAGE
   services:
     - docker:20.10-dind
   script:
-    - docker rmi task-manager-using-flask_web --force || true
-    - docker image prune -a
     - docker build -t task-manager-using-flask_web .
-  tags:
-    - dev
-  only:
-    - development
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "development"'
+    - if: '$CI_COMMIT_BRANCH == "staging"'
 
-tests_unit_job:
+######################
+# TESTES
+######################
+tests_unit:
   stage: tests
-  image: ${PYTHON_IMAGE}
+  image: $PYTHON_IMAGE
   script:
-    - ${PIP_UPGRADE_CMD}
+    - $PIP_UPGRADE_CMD
     - pip install -r requirements.txt
     - python3 -m unittest discover -s todo_project/todo_project/tests/unit
-  tags:
-    - dev
-  only:
-    - development
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "development"'
 
+tests_integration:
+  stage: tests
+  image: $PYTHON_IMAGE
+  script:
+    - $PIP_UPGRADE_CMD
+    - pip install -r requirements.txt
+    - python3 -m unittest discover -s todo_project/todo_project/tests/integration
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "staging"'
+
+tests_functional:
+  stage: tests
+  image: $PYTHON_IMAGE
+  script:
+    - $PIP_UPGRADE_CMD
+    - pip install -r requirements.txt
+    - pip install selenium
+    - python3 -m unittest discover -s todo_project/todo_project/tests/functional
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "staging"'
+
+######################
+# SAST
+######################
 bandit_job:
   stage: sast
-  image: ${PYTHON_IMAGE}
+  image: $PYTHON_IMAGE
   script:
-    - ${PIP_UPGRADE_CMD}
+    - $PIP_UPGRADE_CMD
     - pip install bandit
     - bandit -r . -f html -o bandit-report.html || true
     - bandit -r . -f json | tee bandit-output.json || true
-  tags:
-    - sec
   artifacts:
     paths:
       - bandit-report.html
       - bandit-output.json
     expire_in: 1 week
-  only:
-    - development
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "development"'
 
 dependency_check_job:
   stage: sast
-  image: ${DEPENDENCY_CHECK_IMAGE}
+  image: $DEPENDENCY_CHECK_IMAGE
   script:
     - mkdir -p report
     - chmod +x report
     - dependency-check --project "task-manager-using-flask" --format "HTML" --out report --scan .
-  tags:
-    - sec
   artifacts:
-    when: always
     paths:
       - report/dependency-check-report.html
     expire_in: 1 week
-  only:
-    - development
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "development"'
 
+######################
+# APROVAÇÃO
+######################
 approval_job:
   stage: approval
   script:
-    - echo "Aguardando aprovação para promover para staging..."
-  tags:
-    - dev
-  only:
-    - development
+    - echo "Aguardando aprovação para DAST"
   when: manual
   allow_failure: false
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "staging"'
+
+######################
+# DAST (ZAP)
+######################
+dast_job:
+  stage: dast
+  image: $MAVEN_IMAGE
+  script:
+    - apt-get update && apt-get install -y wget
+    - wget https://github.com/zaproxy/zaproxy/releases/download/v2.14.0/ZAP_2.14.0_Linux.tar.gz
+    - mkdir zap && tar -xvf ZAP_2.14.0_Linux.tar.gz -C zap --strip-components=1
+    - cd zap
+    - ./zap.sh -cmd -quickurl http://192.168.98.10:8080 -quickout ../zap_report.html -quickprogress
+  artifacts:
+    paths:
+      - zap_report.html
+    expire_in: 1 week
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "staging"'
+
+######################
+# DEPLOY
+######################
+deploy_staging:
+  stage: deploy
+  image: $DOCKER_COMPOSE_IMAGE
+  services:
+    - docker:20.10-dind
+  script:
+    - docker-compose -f docker-compose.yml down || true
+    - docker-compose -f docker-compose.yml up -d
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "staging"'
+
