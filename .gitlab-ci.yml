@@ -1,0 +1,88 @@
+variables:
+  DOCKER_TLS_CERTDIR: "/certs"
+  DOCKER_CLIENT_TIMEOUT: 600
+  COMPOSE_HTTP_TIMEOUT: 600
+  DOCKER_BUILDKIT: 0
+  COMPOSE_DOCKER_CLI_BUILD: 0
+  DOCKER_IMAGE: "docker:20.10"
+  PYTHON_IMAGE: "python:3.9-slim-buster"
+  DEPENDENCY_CHECK_IMAGE: "nbaars/owasp-dependency-check-as-one"
+  PIP_UPGRADE_CMD: "pip install --upgrade pip"
+
+stages:
+  - build
+  - tests
+  - sast
+  - approval
+
+build_job:
+  stage: build
+  image: ${DOCKER_IMAGE}
+  services:
+    - docker:20.10-dind
+  script:
+    - docker rmi task-manager-using-flask_web --force || true
+    - docker image prune -a
+    - docker build -t task-manager-using-flask_web .
+  tags:
+    - dev
+  only:
+    - development
+
+tests_unit_job:
+  stage: tests
+  image: ${PYTHON_IMAGE}
+  script:
+    - ${PIP_UPGRADE_CMD}
+    - pip install -r requirements.txt
+    - python3 -m unittest discover -s todo_project/todo_project/tests/unit
+  tags:
+    - dev
+  only:
+    - development
+
+bandit_job:
+  stage: sast
+  image: ${PYTHON_IMAGE}
+  script:
+    - ${PIP_UPGRADE_CMD}
+    - pip install bandit
+    - bandit -r . -f html -o bandit-report.html || true
+    - bandit -r . -f json | tee bandit-output.json || true
+  tags:
+    - sec
+  artifacts:
+    paths:
+      - bandit-report.html
+      - bandit-output.json
+    expire_in: 1 week
+  only:
+    - development
+
+dependency_check_job:
+  stage: sast
+  image: ${DEPENDENCY_CHECK_IMAGE}
+  script:
+    - mkdir -p report
+    - chmod +x report
+    - dependency-check --project "task-manager-using-flask" --format "HTML" --out report --scan .
+  tags:
+    - sec
+  artifacts:
+    when: always
+    paths:
+      - report/dependency-check-report.html
+    expire_in: 1 week
+  only:
+    - development
+
+approval_job:
+  stage: approval
+  script:
+    - echo "Aguardando aprovação para promover para staging..."
+  tags:
+    - dev
+  only:
+    - development
+  when: manual
+  allow_failure: false
